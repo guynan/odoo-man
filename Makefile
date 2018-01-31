@@ -1,9 +1,7 @@
 
 
-CC = pdflatex
-SRC = migrate11.tex
 MAN_PREFIX=/usr/local/share/man/man1
-MAN_SRC=odoo11.tr
+MAN_SRC=odoo11.1
 
 view:
 	man ./$(MAN_SRC)
