@@ -1,0 +1,366 @@
+.TH ODOO 11
+.SH NAME
+Odoo 11 \- A development guide targeted at those who are coming from versions 8+
+
+.SH DESCRIPTION
+While by no means comprehensive, this is written to supplement the lack of (read: no) 
+technical release notes in Odoo. We will target the sections which consist of the 
+breaking changes which you will most likely run into when moving modules to Odoo 11. 
+Changes in conventions have also been documented as while most of them are no more than
+that \-\-a convention\-\- but may be enforced in future releases.
+
+.SH RUNNING THE SERVER
+No functional changes as to how this operates, though it must be noted that the 
+executable no longer goes by the name \fBopenerp-server\fR, instead \fBodoo-bin\fR.
+References to said executable should be updated. Example usage;
+.PP
+.nf
+.RS
+\ ./odoo/odoo-bin -c path/to/config.rc
+.RE
+.fi
+.PP
+
+.SH CONVERTING MODULES
+There is no streamlined process for bringing modules from previous versions of
+Odoo to newer versions. The Belgians make lots of changes and document almost
+none of them. With Odoo 11, we are not merely contending with the changes that
+they have made, but also the ones that have manifested as a result of the move
+from Python 2 from Python 3 as the default interpreter. I did however write a
+script that makes a woeful attempt to buff out the majority of these mechanical
+changes, such as change in import declarations, change in library names, etc.
+To run this magic script, one must navigate to the 
+.BR bin/
+directory, then identify the top\-level directory where the modules you wish to
+convert are located. For example, this would be something like
+.BR modules/common/.
+Thus, arguments are supplied to our script like so:
+
+.PP
+.nf
+.RS
+ sh convert_module.sh modules/common
+.RE
+.fi
+.PP
+This iterates over every Python file, initially tries to resolve the defunct
+imports, moves all the appropriate Python files into a
+.BR models/
+directory if they aren't already in one, fixes up all the XML tag changes and
+probably some other stuff too.
+
+
+.SH UPGRADING THE SERVER
+Upgrading the server is necessary if you have made many changes to your modules
+and intend to resolve errors such as added or removed fields, changed views, and code
+changes. This is kind of the fix all for deploying custom modules. This can be done
+from the command line using
+.BR odoo-bin
+again to upgrade from the base module \- which all modules implicitly depend on \-
+forcing all
+.BR installed
+modules to be upgraded. This also will alert you to any poorly formed dependency
+resolutions, imports or bad view changes.
+.PP
+.nf
+.RS
+\ ./odoo/odoo-bin -c etc/config/yourconfig.rc -d $DB -u base --no-xmlrpc --stop-after-init
+.RE
+.fi
+.PP
+
+.SH FILESYSTEM CONVENTIONS
+There has been a convention change which is not breaking \- but is certainly recommended
+from a structural point of view. At the module level, there should be no Python 
+files present at the top level \-\-aside from those that initialise the module\-\- and should
+thusly be aggregated into a directory named \fImodels/\fR. Similarly for view 
+definitions in XML files they too should be collected and moved into a directory named
+\fIviews/\fR. 
+
+At this point one should update the \fB__manifest__.py\fR to change the data path 
+where the XML files are pointed to and also add an \fB__init__.py\fR in the newly created 
+directory such that these files are visible to the interpreter, making sure to also
+remove the references in the top level \fB__init__.py\fR.
+
+.SH MODULE INITIALISATION
+As of Odoo 10, the \fB__openerp__.py\fR files have been moved to be called 
+\fB__manifest__.py\fR. Aside from the change in nomenclature, there are no functional
+changes to how these are interpreted.
+
+.SH IMPORT LEVEL CHANGES
+Some of these are due to changes in the base modules, and others are due to Python3
+either deprecating some modules, or rolling them into one module.
+
+The most pertinent change here is the change from openerp to odoo to access the base
+module. This means that imports will go from:
+
+.PP
+.nf
+.RS
+\m[blue]from\m[] openerp \m[blue]import\m[] api, fields, models;
+.RE
+.fi
+.PP
+to:
+.PP
+.nf
+.RS
+\m[blue]from\m[] odoo \m[blue]import\m[] api, fields, models;
+.RE
+.fi
+.PP
+
+.SS RELATIVE IMPORTS
+This is very important to getting your module running. In Python 3, \fBimport foo\fR
+can only import from a "top-level" library (absolute path). 
+If trying to import a sibling or sub-module you must use an explicitly relative 
+Additionally, relative imports allow navigating "up" the tree by using multiple leading ..
+Note, explicitly relative imports are always available in Python 2, and should be used everywhere.
+In Python 2 import statements are ambiguous: if a file a.py contains import b, the import 
+system will first check if there's a b.py file next to it before checking if 
+there is a package called that on the PYTHONPATH.
+.PP
+.nf
+.RS
+\m[blue]from\m[] . \m[blue]import\m[] foo
+.RE
+.fi
+.PP
+or 
+.PP
+.nf
+.RS
+\m[blue]from\m[] .foo \m[blue]import\m[] bar
+.RE
+.fi
+.PP
+You can read more about this change at
+.UR https://www.python.org/dev/peps/pep-0328/
+.UE 
+However, if one would like to implement a universal hack - you have come to the
+right place. You can alter the
+.BR odoo.addons
+namespace such that the old Python2 namespace resolution can be accepted too.
+This can be done by adding this line to the
+.BR __init__.py
+at the top level of your module:
+.PP
+.nf
+.RS
+__path__ = __import__(\m[green]'pkgutil'\m[]).extend_path(__path__, __name__)
+.RE
+.fi
+.PP
+This will subsequently add a virtual reference to your module into
+.BR odoo.addons
+meaning that you can access the classes and methods thusly;
+.PP
+.nf
+.RS
+\m[blue]from\m[] odoo.addons.solnet_utils.models.date_utils \m[blue]import\m[] convert_datetime_to_local, convert_datetime_to_utc
+.RE
+.fi
+.PP
+While this is nice for backwards compatibility and for ensuring the number of migraines is
+initially lower, this could change unpredictably in future both if Python takes measures to
+stop this namespace mangling or if Odoo takes similar precautions. Note however this hack
+is lifted from the
+.BR odoo/odoo/__init__.py
+so it is a well documented hack that the team itself relies upon.
+
+
+.SS Deprecated Imports - Python
+These changes stem back to the move from Python2 to Python3. Some of changes suggested
+here can be used inplace with no repercussions, though others \-\-while may appear functional\-\-
+disguise changes that may behave subtly different.
+
+.BR	StringIO
+\- This has now been rolled into the new 
+.BR io
+module in Python 3. For mindless compatibility one can:
+
+.RS
+\m[blue]from\m[] io \m[blue]import\m[] StringIO \m[blue]as\m[] StringIO;
+.RE
+
+.BR cStringIO
+\- This too has been rolled into the new
+.BR io
+module and now goes by the name of
+.BR BytesIO
+Again, to achieve mindless compatibility;
+
+.RS
+\m[blue]from\m[] io \m[blue]import\m[] BytesIO \m[blue]as\m[] cStringIO;
+.RE
+
+.BR __future__
+\- Can't import the future when the future is now the present. Remove these imports.
+
+.BR urllib2
+\- This is no longer in Python3, as a result you can tentatively treat \fBurllib\fR
+as a 1:1 replacement for the former, however there is some functionality that will
+not behave how you expect. If you have any doubts read through the
+Python documentation on the matter.
+
+.BR unittest2
+\- This is not longer in Python3, like above, you can tentatively treat \fBunittest\fR
+as a drop in replacement. Allegedly, it does not support some advanced features that
+were in the Python2 versions.
+
+.SS Deprecated Imports - Odoo
+These changes are from changes in the base modules. Most of them are not particularly
+different in functionality 
+
+
+
+.SH LANGUAGE LEVEL CHANGES
+Moving from Python 2 to 3 is quite a big change. As a brief overview:
+
+.SS Changes to integer division
+Integer division has changed to be more stupid. In any calculation where integer division is
+used under the pattern 
+.BR (int / int) -> int
+will most likely be wrong. This was discussed at length in PEP 238. While they arrived at the
+wrong conclusion, it certainly makes engaging arguments for the change. As a consequence,
+to arrive at the behaviour that is expected by the division of two integers producing
+another integer; you must now use the floor division operator, '//'.
+
+.SS Exception handling
+The syntactic option for associating exception objects to a keyword by using commas
+has been deprecated in Python3. They now enforce usage of the reserved word
+.BR as
+to do so. So for example:
+
+.PP
+.nf
+.RS
+\m[blue]\fBexcept\fR\m[] \m[green]NameError\m[], err:
+	\m[blue]print\m[](err);
+.RE
+.fi
+.PP
+Should be now:
+.PP
+.nf
+.RS
+\m[blue]\fBexcept\fR\m[] \m[green]NameError\m[] \m[blue]\fBas\fR\m[] err:
+	\m[blue]print\m[](err);
+.RE
+.fi
+.PP
+
+.SS Unicode String Handling
+Unicode strings are now enabled by default in Python 3. This means that all references
+to methods or objects that handle ascii strings and their reperesentation as unicode
+are deprecated and will raise errors. For example you should move references from
+.BR basestring()
+to just
+.BR str().
+
+.SS Naming Conventions
+Python class definitions should be camel case (AnExampleClass) and all model methods
+shall be snake case (an_example_method)
+
+.SS Generators && Iterators
+These are quite powerful additions to the Python language. They allow for constructs
+such as iterating over streams rather than lists. This gives the programmer better
+access to tools that abstract them from creating loops or lists to build a series
+to initialising a \fIrule\fR which can be iterated over in the same way one would
+a list \fIwithout\fR initialising a potentially very large data set (with large memory
+overhead).
+
+This construct is (I assume) implemented as a pair of setjmp in C; each call to the iterator
+yields a context switch to the generator function whereby the previous environment
+(where the generator is defined) is reinitialised. Once back into the generator, the
+function continues execution from where it finished last \-\-most importantly, with the values
+that the last invocation had stored in its variables\-\- and context switches back to
+the calling function.
+
+From a C programming perspective, splattering the shit out
+of every register you so desire is highly inefficient, and the subsequent cache misses would
+send any assembly programmer packing in an ambulance with an acute heart attack.
+
+Though, it is a highly convenient alternative which yield performance enhancements when contrasted
+with initialising very large arrays and mapping each element when you only need the value of
+an immaterial amount of them. The primary advantage here is that you can write more condensed
+code that focusses not on the implementation of the mapping of elements, but rather
+the value in subsequent abstractions.
+
+Generators are now default in Python3, thus no need to import from
+.BR __future__.
+Though it must be noted that the behaviour of these functional constructs have changed
+very subtly.
+
+Functions such as \fBmap\fR(), \fBfilter\fR(), ... now return iterators; contrasted
+with the list that was default returned by these functions in Python2. This just means
+if you have code that implicitly relies on the output being a list -- either adapt it
+to the generator pattern (which can yield performance improvements) or wrap the call
+in a cast to a list. The list paradigm runs with higher memory overhead
+
+.SH MODEL CHANGES
+Those damn Belgians have been busy. Lots of stock modules have been reorganised and so 
+anything which relies too heavily on the implementation of this will have to be 
+reworked considerably.
+
+.SS Ir Values
+This model does not exist any longer. Instead you probably want
+.BR ir.action.server
+In what contexts, I do not really understand.
+
+.SS Cron Changes
+For creation the Cron in odoo11, you will have also have to set \fBmodel_id\fR fields
+also as now in odoo11 ir.cron  have the delegate based relationship with 
+\fBir.actions.server\fR in which the  \fBmodel_id\fR is set to required.
+
+
+.SH API LEVEL CHANGES
+While effectively equivalent to the api that was brought into existance in Odoo 8,
+there are a few soft changes/recommendations. In Odoo 10, it is enforced that there must
+be no pre 8 style code. 
+.SS Field Definitions
+Columns are no longer passed off in a dictionary eith a magic name, instead variables are
+instantiated with \fBfields.Float( ... )\fR where float could be any of Many2one, One2many,
+Float, Boolean, etc. Arguments to the field type are named arguments and the style of 
+naming all arguments (even where unambiguous) is preferred over positional style.
+
+In field defintions there have been some movement in named arguments;
+
+.\" The .RS .RE pair starts and ends a relative indent .\"
+.RS
+\fBdigits_compute\fR is now \fBdigits\fR
+
+\fBselect=\m[blue]True\m[]\fR is now deprecated in favour of \fBindex=\m[blue]True\m[]\fR
+.RE
+
+.SS Exception Handling
+All osv type exceptions are no longer valid and nor is
+.BR Warning().
+Exceptions must now be implemented as 
+.BR Usererror().
+
+.SS @api.one
+This is not recommended for use as the return value is put into a list which \fBmay\fR not play nicely
+with logic that depends on the returned value being a recordset. Instead, decorate with
+\fB@api.multi\fR and call \fBself.ensure_one()\fR.
+
+
+.SH VIEW CHANGES
+Very subtle changes to the views which are represented in the XML. They however are very trivial 
+to make compatible with the new style.
+
+.SS Header tag change
+The new opening tag for XML is moving from 
+.BR <openerp>
+to 
+.BR <odoo>.
+Obviously the closing tags
+have changed similarly.
+
+.SS xpath Identification
+Odoo no longer parses xpaths with elements that rely on a string element. This means 
+that you will have to select another unique attribute to select visual elements with.
+
+.SH AUTHOR
+\m[red]Guy Nankivell \- Solnet Solutions\m[]
+
